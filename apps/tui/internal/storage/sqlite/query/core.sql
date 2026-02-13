@@ -26,6 +26,25 @@ WHERE id = 1;
 -- name: ClearSessionState :exec
 DELETE FROM session_state WHERE id = 1;
 
+-- name: UpsertUISettings :exec
+INSERT INTO ui_settings (
+  id,
+  gutter_preset,
+  updated_at
+) VALUES (
+  1,
+  sqlc.arg(gutter_preset),
+  sqlc.arg(updated_at)
+)
+ON CONFLICT(id) DO UPDATE SET
+  gutter_preset = excluded.gutter_preset,
+  updated_at = excluded.updated_at;
+
+-- name: GetUISettings :one
+SELECT gutter_preset, updated_at
+FROM ui_settings
+WHERE id = 1;
+
 -- name: UpsertUserPreferencesCache :exec
 INSERT INTO user_preferences_cache (
   user_id,

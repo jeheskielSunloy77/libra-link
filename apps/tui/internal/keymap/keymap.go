@@ -3,55 +3,39 @@ package keymap
 import "github.com/charmbracelet/bubbles/key"
 
 type KeyMap struct {
-	Quit key.Binding
-	Help key.Binding
-	Next key.Binding
-	Prev key.Binding
-
-	ToggleZen key.Binding
-	ReaderUp  key.Binding
-	ReaderDown key.Binding
-	ReaderPrevPage key.Binding
-	ReaderNextPage key.Binding
+	Quit     key.Binding
+	Palette  key.Binding
+	Help     key.Binding
+	MoveNext key.Binding
+	MovePrev key.Binding
+	Submit   key.Binding
 }
 
 func Default() KeyMap {
 	return KeyMap{
 		Quit: key.NewBinding(
-			key.WithKeys("q", "ctrl+c"),
-			key.WithHelp("q", "quit"),
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit"),
+		),
+		Palette: key.NewBinding(
+			key.WithKeys("ctrl+p"),
+			key.WithHelp("ctrl+p", "command palette"),
 		),
 		Help: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "help"),
+			key.WithKeys("ctrl+h"),
+			key.WithHelp("ctrl+h", "help"),
 		),
-		Next: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next view"),
+		MoveNext: key.NewBinding(
+			key.WithKeys("down", "tab"),
+			key.WithHelp("down/tab", "next selectable"),
 		),
-		Prev: key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("shift+tab", "prev view"),
+		MovePrev: key.NewBinding(
+			key.WithKeys("up", "shift+tab"),
+			key.WithHelp("up/shift+tab", "prev selectable"),
 		),
-		ToggleZen: key.NewBinding(
-			key.WithKeys("z"),
-			key.WithHelp("z", "toggle zen"),
-		),
-		ReaderUp: key.NewBinding(
-			key.WithKeys("k"),
-			key.WithHelp("k", "up"),
-		),
-		ReaderDown: key.NewBinding(
-			key.WithKeys("j"),
-			key.WithHelp("j", "down"),
-		),
-		ReaderPrevPage: key.NewBinding(
-			key.WithKeys("h"),
-			key.WithHelp("h", "prev page"),
-		),
-		ReaderNextPage: key.NewBinding(
-			key.WithKeys("l"),
-			key.WithHelp("l", "next page"),
+		Submit: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "activate/submit"),
 		),
 	}
 }

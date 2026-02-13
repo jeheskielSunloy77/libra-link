@@ -8,6 +8,12 @@ CREATE TABLE IF NOT EXISTS session_state (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ui_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  gutter_preset TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_preferences_cache (
   user_id TEXT PRIMARY KEY,
   reading_mode TEXT NOT NULL,

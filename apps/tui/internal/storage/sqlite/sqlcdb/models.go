@@ -132,6 +132,12 @@ type SyncEventsOutbox struct {
 	UpdatedAt      string         `json:"updated_at"`
 }
 
+type UiSetting struct {
+	ID           int64  `json:"id"`
+	GutterPreset string `json:"gutter_preset"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
 type UserPreferencesCache struct {
 	UserID             string `json:"user_id"`
 	ReadingMode        string `json:"reading_mode"`

@@ -125,6 +125,24 @@ func (q *Queries) GetSyncCheckpoint(ctx context.Context) (*GetSyncCheckpointRow,
 	return &i, err
 }
 
+const getUISettings = `-- name: GetUISettings :one
+SELECT gutter_preset, updated_at
+FROM ui_settings
+WHERE id = 1
+`
+
+type GetUISettingsRow struct {
+	GutterPreset string `json:"gutter_preset"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+func (q *Queries) GetUISettings(ctx context.Context) (*GetUISettingsRow, error) {
+	row := q.db.QueryRowContext(ctx, getUISettings)
+	var i GetUISettingsRow
+	err := row.Scan(&i.GutterPreset, &i.UpdatedAt)
+	return &i, err
+}
+
 const getUserPreferencesCache = `-- name: GetUserPreferencesCache :one
 SELECT user_id, reading_mode, zen_restore_on_open, theme_mode, theme_overrides_json, typography_profile, row_version, updated_at
 FROM user_preferences_cache
@@ -578,6 +596,31 @@ type UpsertSyncCheckpointParams struct {
 
 func (q *Queries) UpsertSyncCheckpoint(ctx context.Context, arg UpsertSyncCheckpointParams) error {
 	_, err := q.db.ExecContext(ctx, upsertSyncCheckpoint, arg.LastServerTimestamp, arg.LastEventID, arg.UpdatedAt)
+	return err
+}
+
+const upsertUISettings = `-- name: UpsertUISettings :exec
+INSERT INTO ui_settings (
+  id,
+  gutter_preset,
+  updated_at
+) VALUES (
+  1,
+  ?1,
+  ?2
+)
+ON CONFLICT(id) DO UPDATE SET
+  gutter_preset = excluded.gutter_preset,
+  updated_at = excluded.updated_at
+`
+
+type UpsertUISettingsParams struct {
+	GutterPreset string `json:"gutter_preset"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+func (q *Queries) UpsertUISettings(ctx context.Context, arg UpsertUISettingsParams) error {
+	_, err := q.db.ExecContext(ctx, upsertUISettings, arg.GutterPreset, arg.UpdatedAt)
 	return err
 }
 

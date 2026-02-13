@@ -23,6 +23,11 @@ type SessionState struct {
 	UpdatedAt    time.Time
 }
 
+type UISettings struct {
+	GutterPreset string
+	UpdatedAt    time.Time
+}
+
 type PreferencesCache struct {
 	UserID            string
 	ReadingMode       string
@@ -87,6 +92,41 @@ type SyncCheckpoint struct {
 
 func New(q *sqlcdb.Queries) *Repository {
 	return &Repository{q: q}
+}
+
+func (r *Repository) GetUISettings(ctx context.Context) (*UISettings, error) {
+	if r == nil || r.q == nil {
+		return nil, nil
+	}
+
+	row, err := r.q.GetUISettings(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	updatedAt, _ := time.Parse(time.RFC3339Nano, row.UpdatedAt)
+	return &UISettings{
+		GutterPreset: row.GutterPreset,
+		UpdatedAt:    updatedAt,
+	}, nil
+}
+
+func (r *Repository) UpsertUISettings(ctx context.Context, settings UISettings) error {
+	if r == nil || r.q == nil {
+		return nil
+	}
+
+	updatedAt := settings.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	return r.q.UpsertUISettings(ctx, sqlcdb.UpsertUISettingsParams{
+		GutterPreset: settings.GutterPreset,
+		UpdatedAt:    updatedAt.Format(time.RFC3339Nano),
+	})
 }
 
 func (r *Repository) GetSessionState(ctx context.Context) (*SessionState, error) {

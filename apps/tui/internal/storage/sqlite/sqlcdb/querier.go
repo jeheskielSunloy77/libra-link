@@ -13,6 +13,7 @@ type Querier interface {
 	EnqueueSyncOutboxEvent(ctx context.Context, arg EnqueueSyncOutboxEventParams) error
 	GetSessionState(ctx context.Context) (*GetSessionStateRow, error)
 	GetSyncCheckpoint(ctx context.Context) (*GetSyncCheckpointRow, error)
+	GetUISettings(ctx context.Context) (*GetUISettingsRow, error)
 	GetUserPreferencesCache(ctx context.Context, userID string) (*UserPreferencesCache, error)
 	GetUserReaderStateCache(ctx context.Context, userID string) (*UserReaderStateCache, error)
 	ListActiveEbooksCache(ctx context.Context) ([]*EbooksCache, error)
@@ -25,6 +26,7 @@ type Querier interface {
 	UpsertSessionState(ctx context.Context, arg UpsertSessionStateParams) error
 	UpsertShareCache(ctx context.Context, arg UpsertShareCacheParams) error
 	UpsertSyncCheckpoint(ctx context.Context, arg UpsertSyncCheckpointParams) error
+	UpsertUISettings(ctx context.Context, arg UpsertUISettingsParams) error
 	UpsertUserPreferencesCache(ctx context.Context, arg UpsertUserPreferencesCacheParams) error
 	UpsertUserReaderStateCache(ctx context.Context, arg UpsertUserReaderStateCacheParams) error
 }
