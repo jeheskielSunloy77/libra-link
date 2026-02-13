@@ -37,9 +37,85 @@ type UserRepository interface {
 	ResourceRepository[domain.User]
 }
 
+type EbookRepository interface {
+	ResourceRepository[domain.Ebook]
+}
+
+type EbookGoogleMetadataRepository interface {
+	GetByEbookID(ctx context.Context, ebookID uuid.UUID) (*domain.EbookGoogleMetadata, error)
+	Upsert(ctx context.Context, metadata *domain.EbookGoogleMetadata) error
+	SoftDeleteByEbookID(ctx context.Context, ebookID uuid.UUID) error
+}
+
+type UserPreferencesRepository interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.UserPreferences, error)
+	Upsert(ctx context.Context, prefs *domain.UserPreferences) error
+}
+
+type UserReaderStateRepository interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.UserReaderState, error)
+	Upsert(ctx context.Context, state *domain.UserReaderState) error
+}
+
+type ReadingProgressRepository interface {
+	ResourceRepository[domain.ReadingProgress]
+	GetByUserAndEbook(ctx context.Context, userID uuid.UUID, ebookID uuid.UUID) (*domain.ReadingProgress, error)
+}
+
+type BookmarkRepository interface {
+	ResourceRepository[domain.Bookmark]
+}
+
+type AnnotationRepository interface {
+	ResourceRepository[domain.Annotation]
+}
+
+type ShareRepository interface {
+	ResourceRepository[domain.Share]
+}
+
+type BorrowRepository interface {
+	ResourceRepository[domain.Borrow]
+	CountActiveByShare(ctx context.Context, shareID uuid.UUID) (int64, error)
+	GetActiveByShareAndBorrower(ctx context.Context, shareID uuid.UUID, borrowerID uuid.UUID) (*domain.Borrow, error)
+}
+
+type ShareReviewRepository interface {
+	ResourceRepository[domain.ShareReview]
+	GetByShareAndUser(ctx context.Context, shareID uuid.UUID, userID uuid.UUID) (*domain.ShareReview, error)
+}
+
+type ShareReportRepository interface {
+	ResourceRepository[domain.ShareReport]
+}
+
+type SyncEventRepository interface {
+	ResourceRepository[domain.SyncEvent]
+	GetByUserAndIdempotencyKey(ctx context.Context, userID uuid.UUID, idempotencyKey string) (*domain.SyncEvent, error)
+	ListSince(ctx context.Context, userID uuid.UUID, since *time.Time, limit int) ([]domain.SyncEvent, error)
+}
+
+type SyncCheckpointRepository interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.SyncCheckpoint, error)
+	Upsert(ctx context.Context, checkpoint *domain.SyncCheckpoint) error
+}
+
 type Repositories struct {
 	Auth              AuthRepository
 	AuthSession       AuthSessionRepository
 	User              UserRepository
 	EmailVerification EmailVerificationRepository
+	Ebook             EbookRepository
+	EbookMetadata     EbookGoogleMetadataRepository
+	UserPreferences   UserPreferencesRepository
+	UserReaderState   UserReaderStateRepository
+	ReadingProgress   ReadingProgressRepository
+	Bookmark          BookmarkRepository
+	Annotation        AnnotationRepository
+	Share             ShareRepository
+	Borrow            BorrowRepository
+	ShareReview       ShareReviewRepository
+	ShareReport       ShareReportRepository
+	SyncEvent         SyncEventRepository
+	SyncCheckpoint    SyncCheckpointRepository
 }

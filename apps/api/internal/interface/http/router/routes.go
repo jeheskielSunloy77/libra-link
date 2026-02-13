@@ -40,6 +40,27 @@ func registerRoutes(
 	protected := api.Group("", middlewares.Auth.RequireAuth())
 
 	resource(protected, "/users", h.User.ResourceHandler)
+	resource(protected, "/ebooks", h.Ebook.ResourceHandler)
+	resource(protected, "/shares", h.Share.ResourceHandler)
+	resource(protected, "/reading-progress", h.ReadingProgress.ResourceHandler)
+	resource(protected, "/bookmarks", h.Bookmark.ResourceHandler)
+	resource(protected, "/annotations", h.Annotation.ResourceHandler)
+
+	protected.Post("/ebooks/:id/metadata", h.Ebook.AttachMetadata())
+	protected.Delete("/ebooks/:id/metadata", h.Ebook.DetachMetadata())
+
+	protected.Post("/shares/:id/borrow", h.Share.Borrow())
+	protected.Post("/borrows/:id/return", h.Share.ReturnBorrow())
+	protected.Put("/shares/:id/review", h.Share.UpsertReview())
+	protected.Post("/shares/:id/report", h.Share.CreateReport())
+
+	protected.Get("/users/preferences", h.ReaderSettings.GetPreferences())
+	protected.Patch("/users/preferences", h.ReaderSettings.PatchPreferences())
+	protected.Get("/users/reader-state", h.ReaderSettings.GetReaderState())
+	protected.Patch("/users/reader-state", h.ReaderSettings.PatchReaderState())
+
+	protected.Post("/sync/events", h.Sync.StoreEvent())
+	protected.Get("/sync/events", h.Sync.ListEvents())
 }
 
 func resource[T domain.BaseModel, S applicationdto.StoreDTO[T], U applicationdto.UpdateDTO[T], TS httpdto.StoreDTO[S], TU httpdto.UpdateDTO[U]](group fiber.Router, path string, h *handler.ResourceHandler[T, S, U, TS, TU], authMiddleware ...fiber.Handler) {
