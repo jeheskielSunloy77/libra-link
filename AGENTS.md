@@ -2,6 +2,7 @@
 
 - Monorepo managed by Turborepo + Bun workspaces.
 - Go backend lives in `apps/api`; shared TypeScript packages live in `packages/*`.
+- Terminal client lives in `apps/tui` (Go + Bubble Tea + SQLite/sqlc).
 
 - OpenAPI docs are generated from shared Zod schemas in `packages/zod` and written into `apps/api/static/openapi.json`.
 - Email templates are authored in React Email (`packages/emails`) and exported to Go HTML templates consumed by the API.
@@ -21,6 +22,7 @@
 - Install dependencies for all apps and packages: `bun install`
 - Build all apps and packages: `bun run build` or `bun run <APP NAME>:build` to build specific app.
 - Start dev servers for all apps: `bun run dev` or `bun run <APP NAME>:dev` to start specific app. can also use `bun run dev:all` to start all apps and packages.
+- Run TUI directly from root: `bun run tui:run`.
 - Run tests for all apps and packages: `bun run test` or `bun run <APP NAME>:test` to test specific app.
 - Generate OpenAPI spec: `bun run openapi:generate`
 - Generate email HTML templates: `bun run emails:generate`
@@ -57,7 +59,7 @@
 - Context timeouts should use `server.Config.Server.ReadTimeout` / `WriteTimeout`.
 - Auth sessions are stored in `auth_sessions` (see `apps/api/internal/database/migrations/000002_auth_sessions.up.sql`).
 - Cookie config lives under `AuthConfig` (`access_cookie_name`, `refresh_cookie_name`, `cookie_domain`, `cookie_same_site`).
-- Auth routes: `/api/v1/auth/register`, `/login`, `/google`, `/verify-email`, `/refresh`, `/me`, `/resend-verification`, `/logout`, `/logout-all`.
+- Auth routes: `/api/v1/auth/register`, `/login`, `/google`, `/google/device/start`, `/google/device/poll`, `/verify-email`, `/refresh`, `/me`, `/resend-verification`, `/logout`, `/logout-all`.
 
 ### Caching
 
@@ -107,6 +109,35 @@
 - Prefer table-driven tests.
 - Tests live next to code: `foo.go` -> `foo_test.go` or `foo_integration_test.go`.
 - Use helpers in `apps/api/internal/testing` (`SetupTestDB`, `WithRollbackTransaction`) for integration tests.
+
+## App #2: TUI (apps/tui)
+
+### Architecture & Flow
+
+- Entry point: `apps/tui/cmd/tui/main.go`.
+- Core stack: `bubbletea`, `bubbles`, `lipgloss`.
+- Local-first persistence: SQLite + sqlc in `apps/tui/internal/storage/sqlite`.
+- API client is generated from `apps/api/static/openapi.json` into `apps/tui/internal/api/gen`.
+
+### Runtime Behavior
+
+- Session state is stored locally and restored on startup.
+- Offline-first writes are queued in local sync outbox and replayed in background.
+- Reader supports Normal/Zen mode toggle and persists reader state/preferences.
+- Google auth for TUI uses device flow endpoints (`/api/v1/auth/google/device/start` and `/api/v1/auth/google/device/poll`) with callback completion.
+
+### Commands
+
+- Run: `cd apps/tui && go run ./cmd/tui` or root `bun run tui:run`.
+- Build: `cd apps/tui && make build`.
+- Test: `cd apps/tui && make test`.
+- Regenerate sqlc: `cd apps/tui && make sqlc-generate`.
+- Regenerate TUI OpenAPI client: `cd apps/tui && make api-generate`.
+
+### Testing Guidelines
+
+- Keep TUI tests focused on behavior-heavy logic (keymap/state/theme validation/sync decisions).
+- Prefer deterministic unit tests; avoid real network calls in TUI tests.
 
 
 

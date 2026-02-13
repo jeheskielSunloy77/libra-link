@@ -1,6 +1,6 @@
 # libra-link
 
-A monorepo for a Go API with shared TypeScript packages, managed with Turborepo and Bun workspaces. scaffolded with **libra-link** visit the
+A monorepo for a Go API and Go TUI client with shared TypeScript packages, managed with Turborepo and Bun workspaces. scaffolded with **libra-link** visit the
 [repository](https://github.com/jeheskielSunloy77/libra-link) for more details.
 
 ## Repository layout
@@ -8,6 +8,7 @@ A monorepo for a Go API with shared TypeScript packages, managed with Turborepo 
 ```
 libra-link/
 ├── apps/api             # Go API (Fiber)
+├── apps/tui             # Go TUI client (Bubble Tea + SQLite/sqlc)
 
 ├── packages/zod         # Shared Zod schemas
 ├── packages/openapi     # OpenAPI generation
@@ -32,6 +33,9 @@ bun run api:migrate:up   # Run DB migrations
 
 # Start all apps
 bun dev
+
+# Run only the TUI app
+bun run tui:run
 ```
 
 Or you can use docker compose for local development:
@@ -52,11 +56,18 @@ bun run lint
 bun run typecheck
 
 # API helpers (see apps/api/Makefile for migrate targets)
-bun run api:run
+bun run api:dev
 bun run api:test
 cd apps/api && make migrate-new NAME=add_table
 cd apps/api && make migrate-up
 cd apps/api && make migrate-down
+
+# TUI helpers
+bun run tui:run
+cd apps/tui && make build
+cd apps/tui && make test
+cd apps/tui && make sqlc-generate
+cd apps/tui && make api-generate
 
 # Contracts and emails
 bun run openapi:generate    # Generate OpenAPI spec file from contracts
@@ -92,11 +103,36 @@ bun run emails:generate     # Generate email HTML templates
 - Request IDs are set in middleware and injected into logs; use `middleware.GetLogger` in handlers.
 - Context timeouts should use `server.Config.Server.ReadTimeout` / `WriteTimeout`.
 - Auth uses short-lived JWT access tokens and long-lived refresh tokens. `middleware.Auth.RequireAuth` sets `user_id` in Fiber locals; sessions live in `auth_sessions`. Cookie config is under `AuthConfig`.
-- Auth routes: `/api/v1/auth/register`, `/login`, `/google`, `/verify-email`, `/refresh`, `/me`, `/resend-verification`, `/logout`, `/logout-all`.
+- Auth routes: `/api/v1/auth/register`, `/login`, `/google`, `/google/device/start`, `/google/device/poll`, `/verify-email`, `/refresh`, `/me`, `/resend-verification`, `/logout`, `/logout-all`.
 - Background jobs use Asynq (`apps/api/internal/lib/job`). Define new task payloads in `email_tasks.go`, register them in `JobService.Start`, and wire handlers in `handlers.go`.
 - Email templates live in `apps/api/templates/emails` and are generated from `packages/emails`.
 - OpenAPI docs are written to `apps/api/static/openapi.json` and served at `/api/docs`. Update `packages/zod` and `packages/openapi/src/contracts` when endpoints change.
 - Caching layer with Redis in `apps/api/internal/lib/cache`.
+
+## TUI (apps/tui)
+
+### Technologies
+
+- Bubble Tea + Bubbles + Lipgloss
+- SQLite + sqlc for local cache and sync outbox
+- OpenAPI-generated Go client from `apps/api/static/openapi.json`
+
+### Architecture & Conventions
+
+- Entry point: `apps/tui/cmd/tui/main.go`.
+- UI/state orchestration: `apps/tui/internal/app`.
+- Local persistence and queries: `apps/tui/internal/storage/sqlite`.
+- Sync retry worker: `apps/tui/internal/sync`.
+- Reader behavior and format adapters: `apps/tui/internal/reader`.
+- TUI auth uses browser-assisted Google device flow via API endpoints.
+
+### Local Environment Variables
+
+- `LIBRA_TUI_API_BASE_URL` (default `http://localhost:8080`)
+- `LIBRA_TUI_DATA_DIR` (default `~/.local/share/libra-link-tui`)
+- `LIBRA_TUI_HTTP_TIMEOUT_SECONDS` (default `15`)
+- `LIBRA_TUI_SYNC_INTERVAL_SECONDS` (default `10`)
+- `LIBRA_TUI_SYNC_BATCH_SIZE` (default `25`)
 
 
 
