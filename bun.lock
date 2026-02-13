@@ -13,6 +13,10 @@
       "name": "@libra-link/api",
       "version": "1.0.0",
     },
+    "apps/tui": {
+      "name": "@libra-link/tui",
+      "version": "1.0.0",
+    },
     "packages/emails": {
       "name": "@libra-link/emails",
       "version": "1.0.0",
@@ -198,6 +202,8 @@
     "@libra-link/emails": ["@libra-link/emails@workspace:packages/emails"],
 
     "@libra-link/openapi": ["@libra-link/openapi@workspace:packages/openapi"],
+
+    "@libra-link/tui": ["@libra-link/tui@workspace:apps/tui"],
 
     "@libra-link/zod": ["@libra-link/zod@workspace:packages/zod"],
 

@@ -238,6 +238,23 @@ Features are organized by MVP core, MVP TUI-specific UX, and post-MVP cross-plat
   - Include `reading_mode`, `zen_restore_on_open`, `theme_mode`, `theme_overrides`, and `typography_profile`.
   - Enforce enum validation for mode/profile and allowlist + format validation for `theme_overrides`.
 
+### 8.4 TUI Technology Stack Decision (MVP Locked)
+
+- Primary stack for `apps/tui`:
+  - `bubbletea` for app loop and state transitions.
+  - `bubbles` for reusable keyboard-first UI components.
+  - `lipgloss` for theme tokens and runtime style switching.
+- Local-first persistence and sync queue:
+  - SQLite as the on-device store for library cache, session resume state, preferences, and offline sync events.
+  - `sqlc` as the required data access layer for typed SQL queries and deterministic behavior.
+  - Local schema must model event queue replay for hybrid sync conflict handling (LWW + versioned entities).
+- API contract integration:
+  - TUI client should consume generated Go API types/client from OpenAPI (`apps/api/static/openapi.json`) to preserve backend contract parity.
+- Why this stack is selected:
+  - Matches keyboard-first UX and deterministic state requirements for Normal/Zen mode.
+  - Supports near-instant theme and typography updates in active reading sessions.
+  - Reduces solo-dev MVP risk by using established Go TUI patterns while keeping offline sync explicit and testable.
+
 ## 9. Non-Functional Requirements
 
 ### 9.1 Performance
@@ -293,6 +310,7 @@ Features are organized by MVP core, MVP TUI-specific UX, and post-MVP cross-plat
 
 - External: Google Books API, Google OAuth, ebook parsing/rendering libraries.
 - Internal: Existing API architecture, shared Zod/OpenAPI contract pipeline.
+- TUI stack dependencies: Bubble Tea ecosystem (`bubbletea`, `bubbles`, `lipgloss`), SQLite driver, and `sqlc` code generation.
 
 ## 11. Roadmap and Milestones
 

@@ -1,5 +1,8 @@
 import {
 	ZAuthGoogleCallbackQuery,
+	ZAuthGoogleDevicePollDTO,
+	ZAuthGoogleDevicePollResponse,
+	ZAuthGoogleDeviceStart,
 	ZAuthLoginDTO,
 	ZAuthRegisterDTO,
 	ZAuthResult,
@@ -54,6 +57,28 @@ export const authContract = c.router({
 		query: ZAuthGoogleCallbackQuery,
 		responses: {
 			302: ZEmpty,
+		},
+	},
+	googleDeviceStart: {
+		summary: 'Google device auth start',
+		description: 'Start browser-assisted Google auth for terminal clients.',
+		path: '/api/v1/auth/google/device/start',
+		method: 'POST',
+		body: ZEmpty,
+		responses: {
+			200: ZAuthGoogleDeviceStart,
+			...failResponses,
+		},
+	},
+	googleDevicePoll: {
+		summary: 'Google device auth poll',
+		description: 'Poll terminal Google auth status and receive auth result when approved.',
+		path: '/api/v1/auth/google/device/poll',
+		method: 'POST',
+		body: ZAuthGoogleDevicePollDTO,
+		responses: {
+			200: ZAuthGoogleDevicePollResponse,
+			...failResponses,
 		},
 	},
 	verifyEmail: {

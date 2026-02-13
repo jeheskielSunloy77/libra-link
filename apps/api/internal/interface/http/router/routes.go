@@ -25,6 +25,8 @@ func registerRoutes(
 	authGroup := api.Group("/auth")
 	authGroup.Post("/register", h.Auth.Register())
 	authGroup.Post("/login", h.Auth.Login())
+	authGroup.Post("/google/device/start", h.Auth.GoogleDeviceStart())
+	authGroup.Post("/google/device/poll", h.Auth.GoogleDevicePoll())
 	authGroup.Get("/google", h.Auth.GoogleLogin())
 	authGroup.Get("/google/callback", h.Auth.GoogleCallback())
 	authGroup.Post("/verify-email", h.Auth.VerifyEmail())

@@ -1,0 +1,13 @@
+{
+  "name": "@libra-link/tui",
+  "private": true,
+  "version": "1.0.0",
+	"scripts": {
+		"install": "go mod download",
+		"dev": "go run ./cmd/tui",
+		"build": "mkdir -p bin && go build -o bin/tui ./cmd/tui",
+		"test": "go test ./...",
+		"api:generate": "go run ./scripts/generate_openapi_client",
+		"sqlc:generate": "go run ./scripts/generate_sqlc"
+	}
+}

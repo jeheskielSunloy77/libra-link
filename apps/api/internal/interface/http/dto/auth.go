@@ -54,3 +54,11 @@ func (d *VerifyEmailRequest) ToUsecase() dto.VerifyEmailInput {
 		Code:  d.Code,
 	}
 }
+
+type GoogleDevicePollRequest struct {
+	DeviceCode string `json:"deviceCode" validate:"required,min=16"`
+}
+
+func (d *GoogleDevicePollRequest) Validate() error {
+	return validator.New().Struct(d)
+}

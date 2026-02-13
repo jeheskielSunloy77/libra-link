@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -38,7 +39,11 @@ var (
 	emailRegex        = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 )
 
-const googleStateTTL = 10 * time.Minute
+const (
+	googleStateTTL         = 10 * time.Minute
+	googleDevicePollEvery  = 2 * time.Second
+	googleDevicePendingTTL = 10 * time.Minute
+)
 
 type googleOAuthConfig interface {
 	AuthCodeURL(state string, opts ...oauth2.AuthCodeOption) string
@@ -68,6 +73,10 @@ type authService struct {
 	googleTokenValidator googleTokenValidator
 	emailVerificationTTL time.Duration
 	now                  func() time.Time
+	devicePollInterval   time.Duration
+	deviceAuthStates     map[string]*googleDeviceSession
+	deviceStateIndex     map[string]string
+	deviceStateMu        sync.Mutex
 }
 
 type AuthToken struct {
@@ -86,6 +95,9 @@ type AuthService interface {
 	Login(ctx context.Context, input applicationdto.LoginInput, userAgent, ipAddress string) (*AuthResult, error)
 	StartGoogleAuth(ctx context.Context) (*GoogleAuthStart, error)
 	CompleteGoogleAuth(ctx context.Context, code, state, stateCookie, userAgent, ipAddress string) (*AuthResult, error)
+	StartGoogleDeviceAuth(ctx context.Context) (*GoogleDeviceAuthStart, error)
+	CompleteGoogleDeviceAuth(ctx context.Context, code, state, userAgent, ipAddress string) error
+	PollGoogleDeviceAuth(ctx context.Context, deviceCode string) (*GoogleDeviceAuthPollResult, error)
 	VerifyEmail(ctx context.Context, input applicationdto.VerifyEmailInput) (*domain.User, error)
 	Refresh(ctx context.Context, refreshToken, userAgent, ipAddress string) (*AuthResult, error)
 	Logout(ctx context.Context, refreshToken string) error
@@ -102,6 +114,36 @@ type GoogleAuthStart struct {
 	AuthURL        string
 	StateCookie    string
 	StateExpiresAt time.Time
+}
+
+type GoogleDeviceAuthStart struct {
+	DeviceCode      string    `json:"deviceCode"`
+	AuthURL         string    `json:"authUrl"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	IntervalSeconds int       `json:"intervalSeconds"`
+}
+
+type GoogleDeviceAuthStatus string
+
+const (
+	GoogleDeviceAuthPending  GoogleDeviceAuthStatus = "pending"
+	GoogleDeviceAuthApproved GoogleDeviceAuthStatus = "approved"
+	GoogleDeviceAuthExpired  GoogleDeviceAuthStatus = "expired"
+	GoogleDeviceAuthFailed   GoogleDeviceAuthStatus = "failed"
+)
+
+type GoogleDeviceAuthPollResult struct {
+	Status GoogleDeviceAuthStatus `json:"status"`
+	Result *AuthResult            `json:"result,omitempty"`
+}
+
+type googleDeviceSession struct {
+	DeviceCode string
+	State      string
+	ExpiresAt  time.Time
+	Status     GoogleDeviceAuthStatus
+	Result     *AuthResult
+	LastError  string
 }
 
 func NewAuthService(cfg *config.AuthConfig, repo port.AuthRepository, sessionRepo port.AuthSessionRepository, verificationRepo port.EmailVerificationRepository, taskEnqueuer TaskEnqueuer, logger *zerolog.Logger) AuthService {
@@ -134,6 +176,9 @@ func NewAuthService(cfg *config.AuthConfig, repo port.AuthRepository, sessionRep
 		googleTokenValidator: idtoken.Validate,
 		emailVerificationTTL: cfg.EmailVerificationTTL,
 		now:                  time.Now,
+		devicePollInterval:   googleDevicePollEvery,
+		deviceAuthStates:     map[string]*googleDeviceSession{},
+		deviceStateIndex:     map[string]string{},
 	}
 }
 

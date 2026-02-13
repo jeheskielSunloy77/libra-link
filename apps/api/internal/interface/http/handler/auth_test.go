@@ -23,16 +23,19 @@ import (
 )
 
 type stubAuthService struct {
-	registerFn           func(ctx context.Context, input applicationdto.RegisterInput, userAgent, ipAddress string) (*application.AuthResult, error)
-	loginFn              func(ctx context.Context, input applicationdto.LoginInput, userAgent, ipAddress string) (*application.AuthResult, error)
-	startGoogleAuthFn    func(ctx context.Context) (*application.GoogleAuthStart, error)
-	completeGoogleAuthFn func(ctx context.Context, code, state, stateCookie, userAgent, ipAddress string) (*application.AuthResult, error)
-	verifyEmailFn        func(ctx context.Context, input applicationdto.VerifyEmailInput) (*domain.User, error)
-	refreshFn            func(ctx context.Context, refreshToken, userAgent, ipAddress string) (*application.AuthResult, error)
-	logoutFn             func(ctx context.Context, refreshToken string) error
-	logoutAllFn          func(ctx context.Context, userID uuid.UUID) error
-	currentUserFn        func(ctx context.Context, userID uuid.UUID) (*domain.User, error)
-	resendVerificationFn func(ctx context.Context, userID uuid.UUID) error
+	registerFn             func(ctx context.Context, input applicationdto.RegisterInput, userAgent, ipAddress string) (*application.AuthResult, error)
+	loginFn                func(ctx context.Context, input applicationdto.LoginInput, userAgent, ipAddress string) (*application.AuthResult, error)
+	startGoogleAuthFn      func(ctx context.Context) (*application.GoogleAuthStart, error)
+	completeGoogleAuthFn   func(ctx context.Context, code, state, stateCookie, userAgent, ipAddress string) (*application.AuthResult, error)
+	startGoogleDeviceFn    func(ctx context.Context) (*application.GoogleDeviceAuthStart, error)
+	completeGoogleDeviceFn func(ctx context.Context, code, state, userAgent, ipAddress string) error
+	pollGoogleDeviceFn     func(ctx context.Context, deviceCode string) (*application.GoogleDeviceAuthPollResult, error)
+	verifyEmailFn          func(ctx context.Context, input applicationdto.VerifyEmailInput) (*domain.User, error)
+	refreshFn              func(ctx context.Context, refreshToken, userAgent, ipAddress string) (*application.AuthResult, error)
+	logoutFn               func(ctx context.Context, refreshToken string) error
+	logoutAllFn            func(ctx context.Context, userID uuid.UUID) error
+	currentUserFn          func(ctx context.Context, userID uuid.UUID) (*domain.User, error)
+	resendVerificationFn   func(ctx context.Context, userID uuid.UUID) error
 }
 
 func (s *stubAuthService) Register(ctx context.Context, input applicationdto.RegisterInput, userAgent, ipAddress string) (*application.AuthResult, error) {
@@ -59,6 +62,27 @@ func (s *stubAuthService) StartGoogleAuth(ctx context.Context) (*application.Goo
 func (s *stubAuthService) CompleteGoogleAuth(ctx context.Context, code, state, stateCookie, userAgent, ipAddress string) (*application.AuthResult, error) {
 	if s.completeGoogleAuthFn != nil {
 		return s.completeGoogleAuthFn(ctx, code, state, stateCookie, userAgent, ipAddress)
+	}
+	return nil, nil
+}
+
+func (s *stubAuthService) StartGoogleDeviceAuth(ctx context.Context) (*application.GoogleDeviceAuthStart, error) {
+	if s.startGoogleDeviceFn != nil {
+		return s.startGoogleDeviceFn(ctx)
+	}
+	return nil, nil
+}
+
+func (s *stubAuthService) CompleteGoogleDeviceAuth(ctx context.Context, code, state, userAgent, ipAddress string) error {
+	if s.completeGoogleDeviceFn != nil {
+		return s.completeGoogleDeviceFn(ctx, code, state, userAgent, ipAddress)
+	}
+	return nil
+}
+
+func (s *stubAuthService) PollGoogleDeviceAuth(ctx context.Context, deviceCode string) (*application.GoogleDeviceAuthPollResult, error) {
+	if s.pollGoogleDeviceFn != nil {
+		return s.pollGoogleDeviceFn(ctx, deviceCode)
 	}
 	return nil, nil
 }
@@ -273,6 +297,97 @@ func TestAuthHandlerGoogleCallback_RedirectsToSuccess(t *testing.T) {
 	cookieHeaders := strings.Join(resp.Header["Set-Cookie"], "; ")
 	require.Contains(t, cookieHeaders, "access_token=")
 	require.Contains(t, cookieHeaders, "refresh_token=")
+}
+
+// Ensures Google device auth start returns device code payload for terminal clients.
+func TestAuthHandlerGoogleDeviceStart_Success(t *testing.T) {
+	srv := newTestServer()
+	app := newTestApp(srv)
+
+	authService := &stubAuthService{
+		startGoogleDeviceFn: func(ctx context.Context) (*application.GoogleDeviceAuthStart, error) {
+			return &application.GoogleDeviceAuthStart{
+				DeviceCode:      "device-code-1234567890",
+				AuthURL:         "https://accounts.google.com/o/oauth2/auth?state=device",
+				ExpiresAt:       time.Now().Add(10 * time.Minute),
+				IntervalSeconds: 2,
+			}, nil
+		},
+	}
+
+	h := NewAuthHandler(NewHandler(srv), authService)
+	app.Post("/google/device/start", h.GoogleDeviceStart())
+
+	req, err := http.NewRequest(http.MethodPost, "/google/device/start", bytes.NewReader(mustJSON(t, map[string]any{})))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var got response.Response[application.GoogleDeviceAuthStart]
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	require.NotNil(t, got.Data)
+	require.Equal(t, "device-code-1234567890", got.Data.DeviceCode)
+}
+
+// Ensures Google device auth poll validates and returns pending status.
+func TestAuthHandlerGoogleDevicePoll_Success(t *testing.T) {
+	srv := newTestServer()
+	app := newTestApp(srv)
+
+	var gotCode string
+	authService := &stubAuthService{
+		pollGoogleDeviceFn: func(ctx context.Context, deviceCode string) (*application.GoogleDeviceAuthPollResult, error) {
+			gotCode = deviceCode
+			return &application.GoogleDeviceAuthPollResult{Status: application.GoogleDeviceAuthPending}, nil
+		},
+	}
+
+	h := NewAuthHandler(NewHandler(srv), authService)
+	app.Post("/google/device/poll", h.GoogleDevicePoll())
+
+	req, err := http.NewRequest(http.MethodPost, "/google/device/poll", bytes.NewReader(mustJSON(t, map[string]any{"deviceCode": "device-code-1234567890"})))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "device-code-1234567890", gotCode)
+
+	var got response.Response[application.GoogleDeviceAuthPollResult]
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	require.NotNil(t, got.Data)
+	require.Equal(t, application.GoogleDeviceAuthPending, got.Data.Status)
+}
+
+// Ensures Google callback without state cookie executes device auth completion flow.
+func TestAuthHandlerGoogleCallback_DeviceFlowSuccess(t *testing.T) {
+	srv := newTestServer()
+	app := newTestApp(srv)
+
+	called := false
+	authService := &stubAuthService{
+		completeGoogleDeviceFn: func(ctx context.Context, code, state, userAgent, ipAddress string) error {
+			called = true
+			require.Equal(t, "device-code", code)
+			require.Equal(t, "device-state", state)
+			return nil
+		},
+	}
+
+	h := NewAuthHandler(NewHandler(srv), authService)
+	app.Get("/google/callback", h.GoogleCallback())
+
+	req, err := http.NewRequest(http.MethodGet, "/google/callback?code=device-code&state=device-state", nil)
+	require.NoError(t, err)
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.True(t, called)
 }
 
 // Ensures VerifyEmail validates required fields.

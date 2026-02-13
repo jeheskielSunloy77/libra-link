@@ -77,6 +77,23 @@ func (h *AuthHandler) GoogleCallback() fiber.Handler {
 		state := c.Query("state")
 		stateCookie := c.Cookies(googleStateCookieName)
 
+		if strings.TrimSpace(stateCookie) == "" {
+			if err := h.authService.CompleteGoogleDeviceAuth(
+				c.UserContext(),
+				code,
+				state,
+				c.Get(fiber.HeaderUserAgent),
+				c.IP(),
+			); err != nil {
+				middleware.GetLogger(c).Warn().Err(err).Msg("google device auth callback failed")
+				c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
+				return c.Status(http.StatusBadRequest).SendString("<html><body><h3>Google sign-in failed</h3><p>You can close this tab and try again from the terminal.</p></body></html>")
+			}
+
+			c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
+			return c.Status(http.StatusOK).SendString("<html><body><h3>Google sign-in approved</h3><p>You can return to the terminal now.</p></body></html>")
+		}
+
 		result, err := h.authService.CompleteGoogleAuth(
 			c.UserContext(),
 			code,
@@ -96,6 +113,40 @@ func (h *AuthHandler) GoogleCallback() fiber.Handler {
 
 		return c.Redirect(h.server.Config.Auth.GoogleSuccessRedirectURL, http.StatusFound)
 	}
+}
+
+func (h *AuthHandler) GoogleDeviceStart() fiber.Handler {
+	return Handle(h.Handler, func(c *fiber.Ctx, _ *httpdto.Empty) (*response.Response[application.GoogleDeviceAuthStart], error) {
+		start, err := h.authService.StartGoogleDeviceAuth(c.UserContext())
+		if err != nil {
+			return nil, err
+		}
+
+		resp := response.Response[application.GoogleDeviceAuthStart]{
+			Status:  http.StatusOK,
+			Success: true,
+			Message: "Device auth started.",
+			Data:    start,
+		}
+		return &resp, nil
+	}, http.StatusOK, &httpdto.Empty{})
+}
+
+func (h *AuthHandler) GoogleDevicePoll() fiber.Handler {
+	return Handle(h.Handler, func(c *fiber.Ctx, req *httpdto.GoogleDevicePollRequest) (*response.Response[application.GoogleDeviceAuthPollResult], error) {
+		result, err := h.authService.PollGoogleDeviceAuth(c.UserContext(), req.DeviceCode)
+		if err != nil {
+			return nil, err
+		}
+
+		resp := response.Response[application.GoogleDeviceAuthPollResult]{
+			Status:  http.StatusOK,
+			Success: true,
+			Message: "Device auth poll result.",
+			Data:    result,
+		}
+		return &resp, nil
+	}, http.StatusOK, &httpdto.GoogleDevicePollRequest{})
 }
 
 func (h *AuthHandler) VerifyEmail() fiber.Handler {
