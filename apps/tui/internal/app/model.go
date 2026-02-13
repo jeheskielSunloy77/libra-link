@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"net/mail"
 	"os"
 	"os/exec"
@@ -28,6 +30,12 @@ import (
 const (
 	pageJumpSize = 20
 )
+
+var supportedBookFormats = map[string]struct{}{
+	"txt":  {},
+	"pdf":  {},
+	"epub": {},
+}
 
 type authMode string
 
@@ -88,6 +96,26 @@ type googlePollMsg struct {
 
 type googlePollTickMsg struct{}
 
+type addBookPrepared struct {
+	SourcePath   string
+	Title        string
+	Description  string
+	LanguageCode string
+	Format       string
+	Checksum     string
+	FileSize     int64
+	ImportedAt   time.Time
+	BaseDestPath string
+	Ext          string
+}
+
+type addBookResultMsg struct {
+	created   *api.Ebook
+	err       error
+	duplicate bool
+	prepared  *addBookPrepared
+}
+
 type Model struct {
 	cfg         *config.Config
 	apiClient   *api.Client
@@ -125,6 +153,17 @@ type Model struct {
 	searchQuery  string
 	searchActive bool
 	searchInput  textinput.Model
+	addActive    bool
+	addFocusIdx  int
+	addSource    textinput.Model
+	addTitle     textinput.Model
+	addDesc      textinput.Model
+	addLanguage  textinput.Model
+	addFormat    textinput.Model
+	addFormatSet bool
+
+	addConfirmDuplicate bool
+	pendingAdd          *addBookPrepared
 
 	shares     []repo.ShareCache
 	shareIndex int
@@ -175,6 +214,27 @@ func New(cfg *config.Config, apiClient *api.Client, store *repo.Repository, sess
 	searchInput.Placeholder = "search title/author"
 	searchInput.Prompt = "search: "
 
+	addSourceInput := textinput.New()
+	addSourceInput.Placeholder = "/path/to/book.txt"
+	addSourceInput.Prompt = "source: "
+
+	addTitleInput := textinput.New()
+	addTitleInput.Placeholder = "book title"
+	addTitleInput.Prompt = "title: "
+
+	addDescInput := textinput.New()
+	addDescInput.Placeholder = "description (optional)"
+	addDescInput.Prompt = "description: "
+
+	addLanguageInput := textinput.New()
+	addLanguageInput.Placeholder = "language code (optional)"
+	addLanguageInput.Prompt = "language: "
+
+	addFormatInput := textinput.New()
+	addFormatInput.Placeholder = "txt|pdf|epub"
+	addFormatInput.Prompt = "format: "
+	addFormatInput.SetValue("txt")
+
 	syncCtx, cancel := context.WithCancel(context.Background())
 	if worker != nil {
 		go worker.Run(syncCtx, cfg.SyncInterval)
@@ -197,6 +257,11 @@ func New(cfg *config.Config, apiClient *api.Client, store *repo.Repository, sess
 		signupConfirmInput: signupConfirmInput,
 		authMode:           authModeSignIn,
 		searchInput:        searchInput,
+		addSource:          addSourceInput,
+		addTitle:           addTitleInput,
+		addDesc:            addDescInput,
+		addLanguage:        addLanguageInput,
+		addFormat:          addFormatInput,
 		readingMode:        "normal",
 		googlePollEvery:    2 * time.Second,
 		prefs: api.Preferences{
@@ -387,6 +452,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Updated"
 		}
 		return m, nil
+	case addBookResultMsg:
+		if typed.err != nil {
+			m.addConfirmDuplicate = false
+			m.pendingAdd = nil
+			m.errMsg = typed.err.Error()
+			m.status = "Add book failed"
+			return m, nil
+		}
+		if typed.duplicate {
+			m.pendingAdd = typed.prepared
+			m.addConfirmDuplicate = true
+			m.status = "Duplicate detected. Press y to import anyway, n to cancel."
+			m.errMsg = ""
+			return m, nil
+		}
+		if typed.created != nil {
+			title := fallback(typed.created.Title, "book")
+			m.clearAddMode()
+			m.status = "Book added: " + title
+			m.errMsg = ""
+			return m, m.fetchEbooksCmd()
+		}
+		return m, nil
 	}
 
 	if m.view == 0 && !m.loggedIn {
@@ -534,11 +622,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	if msg.String() == "tab" {
+	if msg.String() == "tab" && !(m.view == 1 && m.addActive) {
 		m.view = (m.view + 1) % len(m.tabs)
 		return m, nil
 	}
-	if msg.String() == "shift+tab" {
+	if msg.String() == "shift+tab" && !(m.view == 1 && m.addActive) {
 		m.view = (m.view - 1 + len(m.tabs)) % len(m.tabs)
 		return m, nil
 	}
@@ -558,6 +646,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleLibraryKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.addActive {
+		return m.handleAddBookKeys(msg)
+	}
+
 	if m.searchActive {
 		switch msg.String() {
 		case "esc":
@@ -587,6 +679,9 @@ func (m *Model) handleLibraryKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		return m, m.fetchEbooksCmd()
+	case "a":
+		m.enterAddMode()
+		return m, nil
 	case "/":
 		m.searchActive = true
 		m.searchInput.Focus()
@@ -601,6 +696,62 @@ func (m *Model) handleLibraryKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.patchReaderStateCmd()
 	}
 	return m, nil
+}
+
+func (m *Model) handleAddBookKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.addConfirmDuplicate {
+		switch msg.String() {
+		case "y":
+			return m, m.confirmDuplicateAddBookCmd()
+		case "n", "esc":
+			m.addConfirmDuplicate = false
+			m.pendingAdd = nil
+			m.status = "Duplicate import canceled"
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.clearAddMode()
+		m.status = "Add book canceled"
+		m.errMsg = ""
+		return m, nil
+	case "tab":
+		m.addFocusIdx = (m.addFocusIdx + 1) % 5
+		m.applyAddFocus()
+		return m, nil
+	case "shift+tab":
+		m.addFocusIdx = (m.addFocusIdx - 1 + 5) % 5
+		m.applyAddFocus()
+		return m, nil
+	case "ctrl+s":
+		return m, m.prepareAddBookCmd()
+	}
+
+	var cmd tea.Cmd
+	switch m.addFocusIdx {
+	case 0:
+		m.addSource, cmd = m.addSource.Update(msg)
+		if inferred := inferFormatFromPath(m.addSource.Value()); inferred != "" && !m.addFormatSet {
+			m.addFormat.SetValue(inferred)
+		}
+	case 1:
+		m.addTitle, cmd = m.addTitle.Update(msg)
+	case 2:
+		m.addDesc, cmd = m.addDesc.Update(msg)
+	case 3:
+		m.addLanguage, cmd = m.addLanguage.Update(msg)
+	default:
+		before := m.addFormat.Value()
+		m.addFormat, cmd = m.addFormat.Update(msg)
+		if strings.TrimSpace(m.addFormat.Value()) != strings.TrimSpace(before) {
+			m.addFormatSet = true
+		}
+	}
+	return m, cmd
 }
 
 func (m *Model) handleReaderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -748,8 +899,26 @@ func (m *Model) renderLogin(styles viewStyles) string {
 }
 
 func (m *Model) renderLibrary(styles viewStyles) string {
+	if m.addActive {
+		rows := []string{
+			styles.sectionTitle.Render("Add Book"),
+			m.addSource.View(),
+			m.addTitle.View(),
+			m.addDesc.View(),
+			m.addLanguage.View(),
+			m.addFormat.View(),
+			styles.subtle.Render("storageKey: " + m.addStorageKeyPreview()),
+		}
+		if m.addConfirmDuplicate {
+			rows = append(rows, styles.subtle.Render("Duplicate detected. Press y to import anyway, n to cancel."))
+		} else {
+			rows = append(rows, styles.subtle.Render("ctrl+s submit  esc cancel  tab/shift+tab switch field"))
+		}
+		return styles.panel.Render(strings.Join(rows, "\n"))
+	}
+
 	if len(m.ebooks) == 0 {
-		return styles.panel.Render("Library is empty. press r to sync from API.")
+		return styles.panel.Render("Library is empty. press a to add a book or r to sync from API.")
 	}
 	rows := make([]string, 0, len(m.ebooks)+2)
 	rows = append(rows, styles.sectionTitle.Render("Library"))
@@ -765,7 +934,7 @@ func (m *Model) renderLibrary(styles viewStyles) string {
 		}
 		rows = append(rows, rowStyle.Render(fmt.Sprintf("%s%s [%s]", prefix, book.Title, fallback(book.Format, "unknown"))))
 	}
-	rows = append(rows, styles.subtle.Render("enter=open  r=refresh  /=search  ctrl+s=apply search"))
+	rows = append(rows, styles.subtle.Render("enter=open  a=add  r=refresh  /=search  ctrl+s=apply search"))
 	return styles.panel.Render(strings.Join(rows, "\n"))
 }
 
@@ -879,6 +1048,277 @@ func (m *Model) openBook(book repo.EbookCache) {
 	m.document = doc
 	m.readerLine = 0
 	m.status = "Opened " + book.Title
+}
+
+func (m *Model) enterAddMode() {
+	m.addActive = true
+	m.addConfirmDuplicate = false
+	m.pendingAdd = nil
+	m.searchActive = false
+	m.searchInput.Blur()
+	m.addFocusIdx = 0
+	m.addFormatSet = false
+	m.addSource.SetValue("")
+	m.addTitle.SetValue("")
+	m.addDesc.SetValue("")
+	m.addLanguage.SetValue("")
+	m.addFormat.SetValue("txt")
+	m.applyAddFocus()
+	m.errMsg = ""
+	m.status = "Add new book"
+}
+
+func (m *Model) clearAddMode() {
+	m.addActive = false
+	m.addConfirmDuplicate = false
+	m.pendingAdd = nil
+	m.addFocusIdx = 0
+	m.addFormatSet = false
+	m.addSource.SetValue("")
+	m.addTitle.SetValue("")
+	m.addDesc.SetValue("")
+	m.addLanguage.SetValue("")
+	m.addFormat.SetValue("txt")
+	m.addSource.Blur()
+	m.addTitle.Blur()
+	m.addDesc.Blur()
+	m.addLanguage.Blur()
+	m.addFormat.Blur()
+}
+
+func (m *Model) applyAddFocus() {
+	m.addSource.Blur()
+	m.addTitle.Blur()
+	m.addDesc.Blur()
+	m.addLanguage.Blur()
+	m.addFormat.Blur()
+
+	switch m.addFocusIdx {
+	case 0:
+		m.addSource.Focus()
+	case 1:
+		m.addTitle.Focus()
+	case 2:
+		m.addDesc.Focus()
+	case 3:
+		m.addLanguage.Focus()
+	default:
+		m.addFormat.Focus()
+	}
+}
+
+func (m *Model) addStorageKeyPreview() string {
+	if m.pendingAdd != nil && strings.TrimSpace(m.pendingAdd.BaseDestPath) != "" {
+		return m.pendingAdd.BaseDestPath
+	}
+	source := strings.TrimSpace(m.addSource.Value())
+	if source == "" {
+		return "(computed on submit)"
+	}
+
+	ext := strings.ToLower(filepath.Ext(source))
+	if _, ok := supportedBookFormats[strings.TrimPrefix(ext, ".")]; !ok {
+		return "(unsupported source extension)"
+	}
+
+	dataDir := ""
+	if m.cfg != nil {
+		dataDir = m.cfg.DataDir
+	}
+	return filepath.Join(dataDir, "books", "<sha256>"+ext)
+}
+
+func (m *Model) prepareAddBookCmd() tea.Cmd {
+	sourcePath := strings.TrimSpace(m.addSource.Value())
+	title := strings.TrimSpace(m.addTitle.Value())
+	description := strings.TrimSpace(m.addDesc.Value())
+	languageCode := strings.TrimSpace(m.addLanguage.Value())
+	format := strings.ToLower(strings.TrimSpace(m.addFormat.Value()))
+
+	return func() tea.Msg {
+		if sourcePath == "" {
+			return addBookResultMsg{err: fmt.Errorf("source file path is required")}
+		}
+		if title == "" {
+			return addBookResultMsg{err: fmt.Errorf("title is required")}
+		}
+		if format == "" {
+			inferred := inferFormatFromPath(sourcePath)
+			if inferred == "" {
+				return addBookResultMsg{err: fmt.Errorf("format is required (txt, pdf, epub)")}
+			}
+			format = inferred
+		}
+		if _, ok := supportedBookFormats[format]; !ok {
+			return addBookResultMsg{err: fmt.Errorf("unsupported format %q (allowed: txt, pdf, epub)", format)}
+		}
+
+		absSourcePath, err := filepath.Abs(sourcePath)
+		if err != nil {
+			return addBookResultMsg{err: err}
+		}
+		info, err := os.Stat(absSourcePath)
+		if err != nil {
+			return addBookResultMsg{err: err}
+		}
+		if !info.Mode().IsRegular() {
+			return addBookResultMsg{err: fmt.Errorf("source path must be a regular file")}
+		}
+
+		ext := strings.ToLower(filepath.Ext(absSourcePath))
+		if _, ok := supportedBookFormats[strings.TrimPrefix(ext, ".")]; !ok {
+			return addBookResultMsg{err: fmt.Errorf("unsupported source extension %q (allowed: .txt, .pdf, .epub)", ext)}
+		}
+
+		checksum, fileSize, err := computeFileChecksum(absSourcePath)
+		if err != nil {
+			return addBookResultMsg{err: err}
+		}
+
+		dataDir := ""
+		timeout := 15 * time.Second
+		if m.cfg != nil {
+			dataDir = m.cfg.DataDir
+			if m.cfg.HTTPTimeout > 0 {
+				timeout = m.cfg.HTTPTimeout
+			}
+		}
+		if strings.TrimSpace(dataDir) == "" {
+			return addBookResultMsg{err: fmt.Errorf("data directory is not configured")}
+		}
+
+		prepared := &addBookPrepared{
+			SourcePath:   absSourcePath,
+			Title:        title,
+			Description:  description,
+			LanguageCode: languageCode,
+			Format:       format,
+			Checksum:     checksum,
+			FileSize:     fileSize,
+			ImportedAt:   time.Now().UTC(),
+			BaseDestPath: filepath.Join(dataDir, "books", checksum+ext),
+			Ext:          ext,
+		}
+
+		if _, err := os.Stat(prepared.BaseDestPath); err == nil {
+			return addBookResultMsg{duplicate: true, prepared: prepared}
+		} else if err != nil && !os.IsNotExist(err) {
+			return addBookResultMsg{err: err}
+		}
+
+		if m.apiClient != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			ebooks, err := m.apiClient.ListEbooks(ctx, 200)
+			if err == nil {
+				for _, item := range ebooks {
+					if strings.EqualFold(strings.TrimSpace(item.ChecksumSHA256), checksum) {
+						return addBookResultMsg{duplicate: true, prepared: prepared}
+					}
+				}
+			}
+		}
+
+		return m.createBookFromPrepared(prepared, false)
+	}
+}
+
+func (m *Model) confirmDuplicateAddBookCmd() tea.Cmd {
+	if m.pendingAdd == nil {
+		return nil
+	}
+	prepared := *m.pendingAdd
+	return func() tea.Msg {
+		return m.createBookFromPrepared(&prepared, true)
+	}
+}
+
+func (m *Model) createBookFromPrepared(prepared *addBookPrepared, allowDuplicate bool) tea.Msg {
+	if prepared == nil {
+		return addBookResultMsg{err: fmt.Errorf("missing prepared book payload")}
+	}
+	if m.apiClient == nil {
+		return addBookResultMsg{err: fmt.Errorf("api client is not available")}
+	}
+
+	destPath := prepared.BaseDestPath
+	if allowDuplicate {
+		destPath = filepath.Join(filepath.Dir(prepared.BaseDestPath), fmt.Sprintf("%s-%d%s", prepared.Checksum, time.Now().UTC().UnixNano(), prepared.Ext))
+	}
+
+	if err := copyFile(prepared.SourcePath, destPath); err != nil {
+		return addBookResultMsg{err: err}
+	}
+
+	maxInt := int64(^uint(0) >> 1)
+	if prepared.FileSize > maxInt {
+		_ = os.Remove(destPath)
+		return addBookResultMsg{err: fmt.Errorf("file is too large to import")}
+	}
+
+	timeout := 15 * time.Second
+	if m.cfg != nil && m.cfg.HTTPTimeout > 0 {
+		timeout = m.cfg.HTTPTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	importedAt := prepared.ImportedAt
+	created, err := m.apiClient.CreateEbook(ctx, api.CreateEbookInput{
+		Title:          prepared.Title,
+		Description:    prepared.Description,
+		Format:         prepared.Format,
+		LanguageCode:   prepared.LanguageCode,
+		StorageKey:     destPath,
+		FileSizeBytes:  int(prepared.FileSize),
+		ChecksumSHA256: prepared.Checksum,
+		ImportedAt:     &importedAt,
+	})
+	if err != nil {
+		_ = os.Remove(destPath)
+		return addBookResultMsg{err: err}
+	}
+	return addBookResultMsg{created: created}
+}
+
+func computeFileChecksum(path string) (string, int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	size, err := io.Copy(hasher, file)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return fmt.Sprintf("%x", hasher.Sum(nil)), size, nil
+}
+
+func copyFile(sourcePath, destinationPath string) error {
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o755); err != nil {
+		return err
+	}
+
+	destination, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	if _, err := io.Copy(destination, source); err != nil {
+		return err
+	}
+
+	return destination.Sync()
 }
 
 func (m *Model) bootstrapCmd() tea.Cmd {
@@ -1263,6 +1703,14 @@ func fallback(value, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func inferFormatFromPath(path string) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(strings.TrimSpace(path))), ".")
+	if _, ok := supportedBookFormats[ext]; ok {
+		return ext
+	}
+	return ""
 }
 
 func min(a, b int) int {

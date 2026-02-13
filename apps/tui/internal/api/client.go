@@ -235,18 +235,77 @@ func (c *Client) ListEbooks(ctx context.Context, limit int) ([]Ebook, error) {
 	items := make([]Ebook, 0, len(resp.JSON200.Data))
 	for _, row := range resp.JSON200.Data {
 		item := Ebook{
-			ID:         row.Id.String(),
-			Title:      row.Title,
-			Format:     string(row.Format),
-			StorageKey: row.StorageKey,
-			ImportedAt: row.ImportedAt,
+			ID:             row.Id.String(),
+			Title:          row.Title,
+			Format:         string(row.Format),
+			StorageKey:     row.StorageKey,
+			FileSizeBytes:  row.FileSizeBytes,
+			ChecksumSHA256: row.ChecksumSha256,
+			ImportedAt:     row.ImportedAt,
 		}
 		if row.Description != nil {
 			item.Description = *row.Description
 		}
+		if row.LanguageCode != nil {
+			item.LanguageCode = *row.LanguageCode
+		}
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (c *Client) CreateEbook(ctx context.Context, input CreateEbookInput) (*Ebook, error) {
+	format := strings.ToLower(strings.TrimSpace(input.Format))
+	bodyFormat := gen.EbookStoreJSONBodyFormat(format)
+	importedAt := input.ImportedAt
+	if importedAt == nil {
+		now := time.Now().UTC()
+		importedAt = &now
+	}
+
+	body := gen.EbookStoreJSONRequestBody{
+		Title:          strings.TrimSpace(input.Title),
+		Format:         bodyFormat,
+		StorageKey:     strings.TrimSpace(input.StorageKey),
+		FileSizeBytes:  input.FileSizeBytes,
+		ChecksumSha256: strings.TrimSpace(input.ChecksumSHA256),
+		ImportedAt:     importedAt,
+	}
+
+	description := strings.TrimSpace(input.Description)
+	if description != "" {
+		body.Description = &description
+	}
+	languageCode := strings.TrimSpace(input.LanguageCode)
+	if languageCode != "" {
+		body.LanguageCode = &languageCode
+	}
+
+	resp, err := c.client.EbookStoreWithResponse(ctx, body, c.withBearer())
+	if err != nil {
+		return nil, err
+	}
+	if resp.JSON201 == nil {
+		return nil, apiError("create ebook", resp.StatusCode(), resp.Body)
+	}
+
+	data := resp.JSON201.Data
+	item := &Ebook{
+		ID:             data.Id.String(),
+		Title:          data.Title,
+		Format:         string(data.Format),
+		StorageKey:     data.StorageKey,
+		FileSizeBytes:  data.FileSizeBytes,
+		ChecksumSHA256: data.ChecksumSha256,
+		ImportedAt:     data.ImportedAt,
+	}
+	if data.Description != nil {
+		item.Description = *data.Description
+	}
+	if data.LanguageCode != nil {
+		item.LanguageCode = *data.LanguageCode
+	}
+	return item, nil
 }
 
 func (c *Client) ListShares(ctx context.Context, limit int) ([]Share, error) {

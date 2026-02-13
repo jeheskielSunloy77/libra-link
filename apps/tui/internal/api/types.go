@@ -9,12 +9,26 @@ type User struct {
 }
 
 type Ebook struct {
-	ID          string
-	Title       string
-	Format      string
-	StorageKey  string
-	ImportedAt  time.Time
-	Description string
+	ID             string
+	Title          string
+	Format         string
+	StorageKey     string
+	LanguageCode   string
+	FileSizeBytes  int
+	ChecksumSHA256 string
+	ImportedAt     time.Time
+	Description    string
+}
+
+type CreateEbookInput struct {
+	Title          string
+	Description    string
+	Format         string
+	LanguageCode   string
+	StorageKey     string
+	FileSizeBytes  int
+	ChecksumSHA256 string
+	ImportedAt     *time.Time
 }
 
 type Share struct {

@@ -2,9 +2,6 @@ package router
 
 import (
 	"github.com/gofiber/fiber/v2"
-	applicationdto "github.com/jeheskielSunloy77/libra-link/internal/application/dto"
-	"github.com/jeheskielSunloy77/libra-link/internal/domain"
-	httpdto "github.com/jeheskielSunloy77/libra-link/internal/interface/http/dto"
 	"github.com/jeheskielSunloy77/libra-link/internal/interface/http/handler"
 	"github.com/jeheskielSunloy77/libra-link/internal/interface/http/middleware"
 )
@@ -41,12 +38,12 @@ func registerRoutes(
 	// protected routes
 	protected := api.Group("", middlewares.Auth.RequireAuth())
 
-	resource(protected, "/users", h.User.ResourceHandler)
-	resource(protected, "/ebooks", h.Ebook.ResourceHandler)
-	resource(protected, "/shares", h.Share.ResourceHandler)
-	resource(protected, "/reading-progress", h.ReadingProgress.ResourceHandler)
-	resource(protected, "/bookmarks", h.Bookmark.ResourceHandler)
-	resource(protected, "/annotations", h.Annotation.ResourceHandler)
+	resource(protected, "/users", h.User)
+	resource(protected, "/ebooks", h.Ebook)
+	resource(protected, "/shares", h.Share)
+	resource(protected, "/reading-progress", h.ReadingProgress)
+	resource(protected, "/bookmarks", h.Bookmark)
+	resource(protected, "/annotations", h.Annotation)
 
 	protected.Post("/ebooks/:id/metadata", h.Ebook.AttachMetadata())
 	protected.Delete("/ebooks/:id/metadata", h.Ebook.DetachMetadata())
@@ -65,7 +62,17 @@ func registerRoutes(
 	protected.Get("/sync/events", h.Sync.ListEvents())
 }
 
-func resource[T domain.BaseModel, S applicationdto.StoreDTO[T], U applicationdto.UpdateDTO[T], TS httpdto.StoreDTO[S], TU httpdto.UpdateDTO[U]](group fiber.Router, path string, h *handler.ResourceHandler[T, S, U, TS, TU], authMiddleware ...fiber.Handler) {
+type resourceHandler interface {
+	GetMany() fiber.Handler
+	GetByID() fiber.Handler
+	Store() fiber.Handler
+	Destroy() fiber.Handler
+	Kill() fiber.Handler
+	Restore() fiber.Handler
+	Update() fiber.Handler
+}
+
+func resource(group fiber.Router, path string, h resourceHandler, authMiddleware ...fiber.Handler) {
 	g := group.Group(path, authMiddleware...)
 	g.Get("/", h.GetMany())
 	g.Get("/:id", h.GetByID())
