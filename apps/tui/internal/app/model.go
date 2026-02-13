@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/mail"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,12 +29,24 @@ const (
 	pageJumpSize = 20
 )
 
+type authMode string
+
+const (
+	authModeSignIn authMode = "sign_in"
+	authModeSignUp authMode = "sign_up"
+)
+
 type bootstrapMsg struct {
 	user *api.User
 	err  error
 }
 
 type loginMsg struct {
+	user *api.User
+	err  error
+}
+
+type signupMsg struct {
 	user *api.User
 	err  error
 }
@@ -94,13 +107,18 @@ type Model struct {
 	loggedIn bool
 	user     *api.User
 
-	loginIDInput    textinput.Model
-	loginPWInput    textinput.Model
-	loginFocusIdx   int
-	googleAuthURL   string
-	googleCode      string
-	googleExpires   time.Time
-	googlePollEvery time.Duration
+	loginIDInput       textinput.Model
+	loginPWInput       textinput.Model
+	signupEmailInput   textinput.Model
+	signupUserInput    textinput.Model
+	signupPWInput      textinput.Model
+	signupConfirmInput textinput.Model
+	loginFocusIdx      int
+	authMode           authMode
+	googleAuthURL      string
+	googleCode         string
+	googleExpires      time.Time
+	googlePollEvery    time.Duration
 
 	ebooks       []repo.EbookCache
 	ebookIndex   int
@@ -133,6 +151,26 @@ func New(cfg *config.Config, apiClient *api.Client, store *repo.Repository, sess
 	pwInput.EchoMode = textinput.EchoPassword
 	pwInput.EchoCharacter = '•'
 
+	signupEmailInput := textinput.New()
+	signupEmailInput.Placeholder = "email"
+	signupEmailInput.Prompt = "email: "
+
+	signupUserInput := textinput.New()
+	signupUserInput.Placeholder = "username"
+	signupUserInput.Prompt = "username: "
+
+	signupPWInput := textinput.New()
+	signupPWInput.Placeholder = "password"
+	signupPWInput.Prompt = "password: "
+	signupPWInput.EchoMode = textinput.EchoPassword
+	signupPWInput.EchoCharacter = '•'
+
+	signupConfirmInput := textinput.New()
+	signupConfirmInput.Placeholder = "confirm password"
+	signupConfirmInput.Prompt = "confirm: "
+	signupConfirmInput.EchoMode = textinput.EchoPassword
+	signupConfirmInput.EchoCharacter = '•'
+
 	searchInput := textinput.New()
 	searchInput.Placeholder = "search title/author"
 	searchInput.Prompt = "search: "
@@ -143,19 +181,24 @@ func New(cfg *config.Config, apiClient *api.Client, store *repo.Repository, sess
 	}
 
 	return &Model{
-		cfg:             cfg,
-		apiClient:       apiClient,
-		repo:            store,
-		sessionFile:     sessionStore,
-		worker:          worker,
-		syncCancel:      cancel,
-		keys:            keymap.Default(),
-		tabs:            []string{"Login", "Library", "Reader", "Community", "Settings"},
-		loginIDInput:    idInput,
-		loginPWInput:    pwInput,
-		searchInput:     searchInput,
-		readingMode:     "normal",
-		googlePollEvery: 2 * time.Second,
+		cfg:                cfg,
+		apiClient:          apiClient,
+		repo:               store,
+		sessionFile:        sessionStore,
+		worker:             worker,
+		syncCancel:         cancel,
+		keys:               keymap.Default(),
+		tabs:               []string{"Login", "Library", "Reader", "Community", "Settings"},
+		loginIDInput:       idInput,
+		loginPWInput:       pwInput,
+		signupEmailInput:   signupEmailInput,
+		signupUserInput:    signupUserInput,
+		signupPWInput:      signupPWInput,
+		signupConfirmInput: signupConfirmInput,
+		authMode:           authModeSignIn,
+		searchInput:        searchInput,
+		readingMode:        "normal",
+		googlePollEvery:    2 * time.Second,
 		prefs: api.Preferences{
 			ReadingMode:       "normal",
 			ZenRestoreOnOpen:  true,
@@ -205,6 +248,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.user = typed.user
 		m.view = 1
 		m.status = fmt.Sprintf("Signed in as %s", typed.user.Username)
+		m.errMsg = ""
+		return m, tea.Batch(m.fetchEbooksCmd(), m.fetchSharesCmd(), m.fetchPrefsCmd(), m.fetchReaderStateCmd())
+	case signupMsg:
+		if typed.err != nil {
+			m.errMsg = typed.err.Error()
+			m.status = "Sign up failed"
+			return m, nil
+		}
+		m.loggedIn = true
+		m.user = typed.user
+		m.view = 1
+		m.status = fmt.Sprintf("Account created as %s", typed.user.Username)
 		m.errMsg = ""
 		return m, tea.Batch(m.fetchEbooksCmd(), m.fetchSharesCmd(), m.fetchPrefsCmd(), m.fetchReaderStateCmd())
 	case googleStartMsg:
@@ -336,10 +391,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.view == 0 && !m.loggedIn {
 		var cmd tea.Cmd
-		if m.loginFocusIdx == 0 {
-			m.loginIDInput, cmd = m.loginIDInput.Update(msg)
-		} else {
-			m.loginPWInput, cmd = m.loginPWInput.Update(msg)
+		switch m.authMode {
+		case authModeSignUp:
+			switch m.loginFocusIdx {
+			case 0:
+				m.signupEmailInput, cmd = m.signupEmailInput.Update(msg)
+			case 1:
+				m.signupUserInput, cmd = m.signupUserInput.Update(msg)
+			case 2:
+				m.signupPWInput, cmd = m.signupPWInput.Update(msg)
+			default:
+				m.signupConfirmInput, cmd = m.signupConfirmInput.Update(msg)
+			}
+		default:
+			if m.loginFocusIdx == 0 {
+				m.loginIDInput, cmd = m.loginIDInput.Update(msg)
+			} else {
+				m.loginPWInput, cmd = m.loginPWInput.Update(msg)
+			}
 		}
 		return m, cmd
 	}
@@ -397,17 +466,41 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if !m.loggedIn {
 		switch msg.String() {
+		case "ctrl+n":
+			m.toggleAuthMode()
+			return m, nil
 		case "tab", "shift+tab":
-			m.loginFocusIdx = (m.loginFocusIdx + 1) % 2
-			if m.loginFocusIdx == 0 {
-				m.loginIDInput.Focus()
-				m.loginPWInput.Blur()
-			} else {
-				m.loginPWInput.Focus()
-				m.loginIDInput.Blur()
+			fieldCount := 2
+			if m.authMode == authModeSignUp {
+				fieldCount = 4
 			}
+			if msg.String() == "shift+tab" {
+				m.loginFocusIdx = (m.loginFocusIdx - 1 + fieldCount) % fieldCount
+			} else {
+				m.loginFocusIdx = (m.loginFocusIdx + 1) % fieldCount
+			}
+			m.applyAuthFocus()
 			return m, nil
 		case "enter":
+			if m.authMode == authModeSignUp {
+				email := strings.TrimSpace(m.signupEmailInput.Value())
+				username := strings.TrimSpace(m.signupUserInput.Value())
+				password := strings.TrimSpace(m.signupPWInput.Value())
+				confirm := strings.TrimSpace(m.signupConfirmInput.Value())
+				if email == "" || username == "" || password == "" || confirm == "" {
+					m.errMsg = "email, username, password, and confirm password are required"
+					return m, nil
+				}
+				if _, err := mail.ParseAddress(email); err != nil {
+					m.errMsg = "valid email is required"
+					return m, nil
+				}
+				if password != confirm {
+					m.errMsg = "password and confirm password must match"
+					return m, nil
+				}
+				return m, m.signupCmd(email, username, password)
+			}
 			identifier := strings.TrimSpace(m.loginIDInput.Value())
 			password := strings.TrimSpace(m.loginPWInput.Value())
 			if identifier == "" || password == "" {
@@ -418,7 +511,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "g":
 			return m, m.startGoogleDeviceCmd()
 		}
-		return m, nil
+		var cmd tea.Cmd
+		switch m.authMode {
+		case authModeSignUp:
+			switch m.loginFocusIdx {
+			case 0:
+				m.signupEmailInput, cmd = m.signupEmailInput.Update(msg)
+			case 1:
+				m.signupUserInput, cmd = m.signupUserInput.Update(msg)
+			case 2:
+				m.signupPWInput, cmd = m.signupPWInput.Update(msg)
+			default:
+				m.signupConfirmInput, cmd = m.signupConfirmInput.Update(msg)
+			}
+		default:
+			if m.loginFocusIdx == 0 {
+				m.loginIDInput, cmd = m.loginIDInput.Update(msg)
+			} else {
+				m.loginPWInput, cmd = m.loginPWInput.Update(msg)
+			}
+		}
+		return m, cmd
 	}
 
 	if msg.String() == "tab" {
@@ -608,14 +721,29 @@ func (m *Model) renderLogin(styles viewStyles) string {
 		deviceLine = fmt.Sprintf("device code: %s (expires %s)", m.googleCode[:min(len(m.googleCode), 12)], m.googleExpires.Format(time.Kitchen))
 	}
 
-	body := []string{
-		styles.sectionTitle.Render("Sign in"),
-		m.loginIDInput.View(),
-		m.loginPWInput.View(),
-		styles.subtle.Render("press tab to switch field, enter to sign in"),
+	body := []string{}
+	switch m.authMode {
+	case authModeSignUp:
+		body = append(body,
+			styles.sectionTitle.Render("Sign up"),
+			m.signupEmailInput.View(),
+			m.signupUserInput.View(),
+			m.signupPWInput.View(),
+			m.signupConfirmInput.View(),
+			styles.subtle.Render("press tab to switch field, enter to create account, ctrl+n to switch to sign in"),
+		)
+	default:
+		body = append(body,
+			styles.sectionTitle.Render("Sign in"),
+			m.loginIDInput.View(),
+			m.loginPWInput.View(),
+			styles.subtle.Render("press tab to switch field, enter to sign in, ctrl+n to switch to sign up"),
+		)
+	}
+	body = append(body,
 		styles.subtle.Render(googleLine),
 		styles.subtle.Render(deviceLine),
-	}
+	)
 	return styles.panel.Render(strings.Join(body, "\n"))
 }
 
@@ -787,6 +915,20 @@ func (m *Model) loginCmd(identifier, password string) tea.Cmd {
 		}
 		_ = m.persistSession(user.ID)
 		return loginMsg{user: user}
+	}
+}
+
+func (m *Model) signupCmd(email, username, password string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), m.cfg.HTTPTimeout)
+		defer cancel()
+
+		user, err := m.apiClient.Register(ctx, email, username, password)
+		if err != nil {
+			return signupMsg{err: err}
+		}
+		_ = m.persistSession(user.ID)
+		return signupMsg{user: user}
 	}
 }
 
@@ -1139,4 +1281,44 @@ func max(a, b int) int {
 
 func ptr[T any](value T) *T {
 	return &value
+}
+
+func (m *Model) toggleAuthMode() {
+	if m.authMode == authModeSignUp {
+		m.authMode = authModeSignIn
+	} else {
+		m.authMode = authModeSignUp
+	}
+	m.loginFocusIdx = 0
+	m.errMsg = ""
+	m.status = ""
+	m.applyAuthFocus()
+}
+
+func (m *Model) applyAuthFocus() {
+	switch m.authMode {
+	case authModeSignUp:
+		m.signupEmailInput.Blur()
+		m.signupUserInput.Blur()
+		m.signupPWInput.Blur()
+		m.signupConfirmInput.Blur()
+		switch m.loginFocusIdx {
+		case 0:
+			m.signupEmailInput.Focus()
+		case 1:
+			m.signupUserInput.Focus()
+		case 2:
+			m.signupPWInput.Focus()
+		default:
+			m.signupConfirmInput.Focus()
+		}
+	default:
+		m.loginIDInput.Blur()
+		m.loginPWInput.Blur()
+		if m.loginFocusIdx == 0 {
+			m.loginIDInput.Focus()
+			return
+		}
+		m.loginPWInput.Focus()
+	}
 }
