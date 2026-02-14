@@ -27,7 +27,6 @@ func (d *StoreSyncEventInput) ToModel() *domain.SyncEvent {
 		Payload:         d.Payload,
 		BaseVersion:     d.BaseVersion,
 		ClientTimestamp: d.ClientTimestamp,
-		ServerTimestamp: time.Now().UTC(),
 		IdempotencyKey:  d.IdempotencyKey,
 	}
 }

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -43,6 +44,8 @@ func (r *resourceRepository[T]) EvictCache(ctx context.Context, id uuid.UUID) {
 }
 
 func (r *resourceRepository[T]) Store(ctx context.Context, entity *T) error {
+	ensureUUIDPrimaryKey(entity)
+
 	if err := r.db.WithContext(ctx).Create(entity).Error; err != nil {
 		return err
 	}
@@ -213,4 +216,36 @@ func (r *resourceRepository[T]) getCachedByID(ctx context.Context, id uuid.UUID)
 	}
 
 	return &entity, true
+}
+
+func ensureUUIDPrimaryKey[T domain.BaseModel](entity *T) {
+	if entity == nil {
+		return
+	}
+
+	value := reflect.ValueOf(entity)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return
+	}
+
+	elem := value.Elem()
+	if elem.Kind() != reflect.Struct {
+		return
+	}
+
+	idField := elem.FieldByName("ID")
+	if !idField.IsValid() || !idField.CanSet() {
+		return
+	}
+
+	if idField.Type() != reflect.TypeOf(uuid.UUID{}) {
+		return
+	}
+
+	currentID, ok := idField.Interface().(uuid.UUID)
+	if !ok || currentID != uuid.Nil {
+		return
+	}
+
+	idField.Set(reflect.ValueOf(uuid.New()))
 }

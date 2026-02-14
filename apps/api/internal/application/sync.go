@@ -42,6 +42,9 @@ func (s *syncService) StoreEvent(ctx context.Context, input *applicationdto.Stor
 	}
 
 	event := input.ToModel()
+	if event.ID == uuid.Nil {
+		event.ID = uuid.New()
+	}
 	event.ServerTimestamp = time.Now().UTC()
 
 	if err := s.eventRepo.Store(ctx, event); err != nil {
