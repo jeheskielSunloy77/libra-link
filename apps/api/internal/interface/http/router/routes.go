@@ -38,6 +38,11 @@ func registerRoutes(
 	// protected routes
 	protected := api.Group("", middlewares.Auth.RequireAuth())
 
+	protected.Get("/users/preferences", h.ReaderSettings.GetPreferences())
+	protected.Patch("/users/preferences", h.ReaderSettings.PatchPreferences())
+	protected.Get("/users/reader-state", h.ReaderSettings.GetReaderState())
+	protected.Patch("/users/reader-state", h.ReaderSettings.PatchReaderState())
+
 	resource(protected, "/users", h.User)
 	resource(protected, "/ebooks", h.Ebook)
 	resource(protected, "/shares", h.Share)
@@ -52,11 +57,6 @@ func registerRoutes(
 	protected.Post("/borrows/:id/return", h.Share.ReturnBorrow())
 	protected.Put("/shares/:id/review", h.Share.UpsertReview())
 	protected.Post("/shares/:id/report", h.Share.CreateReport())
-
-	protected.Get("/users/preferences", h.ReaderSettings.GetPreferences())
-	protected.Patch("/users/preferences", h.ReaderSettings.PatchPreferences())
-	protected.Get("/users/reader-state", h.ReaderSettings.GetReaderState())
-	protected.Patch("/users/reader-state", h.ReaderSettings.PatchReaderState())
 
 	protected.Post("/sync/events", h.Sync.StoreEvent())
 	protected.Get("/sync/events", h.Sync.ListEvents())

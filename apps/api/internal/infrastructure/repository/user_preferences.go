@@ -39,14 +39,14 @@ func (r *userPreferencesRepository) Upsert(ctx context.Context, prefs *domain.Us
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_id"}},
-			DoUpdates: clause.Assignments(map[string]any{
-				"reading_mode":        prefs.ReadingMode,
-				"zen_restore_on_open": prefs.ZenRestoreOnOpen,
-				"theme_mode":          prefs.ThemeMode,
-				"theme_overrides":     prefs.ThemeOverrides,
-				"typography_profile":  prefs.TypographyProfile,
-				"row_version":         prefs.RowVersion,
-				"updated_at":          now,
+			DoUpdates: clause.AssignmentColumns([]string{
+				"reading_mode",
+				"zen_restore_on_open",
+				"theme_mode",
+				"theme_overrides",
+				"typography_profile",
+				"row_version",
+				"updated_at",
 			}),
 		}).
 		Create(prefs).

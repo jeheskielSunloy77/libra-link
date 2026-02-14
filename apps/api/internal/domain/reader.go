@@ -23,6 +23,10 @@ func (m UserPreferences) GetID() uuid.UUID {
 	return m.UserID
 }
 
+func (UserPreferences) TableName() string {
+	return "user_preferences"
+}
+
 type UserReaderState struct {
 	UserID          uuid.UUID   `json:"userId" gorm:"type:uuid;primaryKey"`
 	CurrentEbookID  *uuid.UUID  `json:"currentEbookId,omitempty" gorm:"type:uuid"`
@@ -36,6 +40,10 @@ type UserReaderState struct {
 
 func (m UserReaderState) GetID() uuid.UUID {
 	return m.UserID
+}
+
+func (UserReaderState) TableName() string {
+	return "user_reader_state"
 }
 
 type ReadingProgress struct {
