@@ -73,6 +73,7 @@ type Model struct {
 	document    *reader.Document
 	readerLine  int
 	readingMode string
+	readerState *api.ReaderState
 
 	prefs      api.Preferences
 	uiSettings UISettings
@@ -438,6 +439,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.finalize(nil)
 		}
 		if typed.state != nil {
+			m.readerState = typed.state
 			if typed.state.ReadingMode != "" {
 				m.readingMode = typed.state.ReadingMode
 			}

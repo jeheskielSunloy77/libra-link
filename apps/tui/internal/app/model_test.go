@@ -1,11 +1,14 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jeheskielSunloy77/libra-link/apps/tui/internal/api"
 	"github.com/jeheskielSunloy77/libra-link/apps/tui/internal/config"
 	"github.com/jeheskielSunloy77/libra-link/apps/tui/internal/storage/repo"
 )
@@ -279,6 +282,67 @@ func TestSplashStaysVisibleUntilMinDuration(t *testing.T) {
 	got = updated.(*Model)
 	if got.splashActive {
 		t.Fatal("expected splash to close after minimum duration elapsed")
+	}
+}
+
+func TestOpenBookUnreadablePDFFailsExplicitly(t *testing.T) {
+	m := newModelForTest()
+	source := filepath.Join(t.TempDir(), "broken.pdf")
+	if err := os.WriteFile(source, []byte("not a pdf"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	ok := m.openBook(repo.EbookCache{ID: "b1", Title: "Broken PDF", FilePath: source, Format: "pdf"})
+	if ok {
+		t.Fatal("expected openBook to fail")
+	}
+	if m.status != "Failed to open book" {
+		t.Fatalf("expected failed status, got %q", m.status)
+	}
+	if m.errMsg == "" {
+		t.Fatal("expected error message when opening broken pdf")
+	}
+}
+
+func TestOpenBookRestoresLocationForSameEbook(t *testing.T) {
+	m := newModelForTest()
+	source := filepath.Join(t.TempDir(), "sample.txt")
+	if err := os.WriteFile(source, []byte("one\ntwo\nthree\nfour\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	m.readerState = &api.ReaderState{
+		CurrentEbookID:  "book-1",
+		CurrentLocation: "fmt=txt;line=2",
+	}
+
+	ok := m.openBook(repo.EbookCache{ID: "book-1", Title: "Sample", FilePath: source, Format: "txt"})
+	if !ok {
+		t.Fatalf("expected openBook to succeed: %s", m.errMsg)
+	}
+	if m.readerLine != 2 {
+		t.Fatalf("expected restored readerLine=2, got %d", m.readerLine)
+	}
+}
+
+func TestOpenBookDifferentEbookStartsAtTop(t *testing.T) {
+	m := newModelForTest()
+	source := filepath.Join(t.TempDir(), "sample.txt")
+	if err := os.WriteFile(source, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	m.readerState = &api.ReaderState{
+		CurrentEbookID:  "other-book",
+		CurrentLocation: "fmt=txt;line=2",
+	}
+
+	ok := m.openBook(repo.EbookCache{ID: "book-1", Title: "Sample", FilePath: source, Format: "txt"})
+	if !ok {
+		t.Fatalf("expected openBook to succeed: %s", m.errMsg)
+	}
+	if m.readerLine != 0 {
+		t.Fatalf("expected readerLine=0 for different book, got %d", m.readerLine)
 	}
 }
 

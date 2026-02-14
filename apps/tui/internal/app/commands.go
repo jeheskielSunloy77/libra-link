@@ -20,10 +20,10 @@ import (
 	"github.com/jeheskielSunloy77/libra-link/apps/tui/internal/storage/repo"
 )
 
-func (m *Model) openBook(book repo.EbookCache) {
+func (m *Model) openBook(book repo.EbookCache) bool {
 	if m.cfg == nil {
 		m.errMsg = "config is not available"
-		return
+		return false
 	}
 
 	path := strings.TrimSpace(book.FilePath)
@@ -33,13 +33,20 @@ func (m *Model) openBook(book repo.EbookCache) {
 
 	doc, err := reader.Load(path)
 	if err != nil {
-		_ = os.MkdirAll(filepath.Dir(path), 0o755)
-		_ = os.WriteFile(path, []byte("This is a local placeholder text for "+book.Title+".\nAdd real files to read full content."), 0o644)
-		doc, _ = reader.Load(path)
+		m.errMsg = err.Error()
+		m.status = "Failed to open book"
+		return false
 	}
 	m.document = doc
 	m.readerLine = 0
+	if m.readerState != nil && strings.TrimSpace(m.readerState.CurrentEbookID) == strings.TrimSpace(book.ID) {
+		if line, ok := reader.DecodeLocation(doc, m.readerState.CurrentLocation); ok {
+			m.readerLine = line
+		}
+	}
+	m.errMsg = ""
 	m.status = "Opened " + book.Title
+	return true
 }
 
 func (m *Model) addStorageKeyPreview() string {
@@ -605,10 +612,11 @@ func (m *Model) patchPrefsCmd() tea.Cmd {
 }
 
 func (m *Model) patchReaderStateCmd() tea.Cmd {
+	location := reader.EncodeLocation(m.document, m.readerLine)
 	state := api.ReaderState{
 		UserID:          m.currentUserID(),
 		ReadingMode:     m.readingMode,
-		CurrentLocation: fmt.Sprintf("line:%d", m.readerLine),
+		CurrentLocation: location,
 		LastOpenedAt:    ptr(time.Now().UTC()),
 	}
 

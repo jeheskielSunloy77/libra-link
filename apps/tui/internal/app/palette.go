@@ -301,9 +301,11 @@ func (m *Model) executePaletteCommand(id string) tea.Cmd {
 			if err != nil || idx < 0 || idx >= len(m.ebooks) {
 				return nil
 			}
-			m.screen = ScreenReader
 			m.ebookIndex = idx
-			m.openBook(m.ebooks[idx])
+			if !m.openBook(m.ebooks[idx]) {
+				return nil
+			}
+			m.screen = ScreenReader
 			return m.patchReaderStateCmd()
 		}
 		return nil

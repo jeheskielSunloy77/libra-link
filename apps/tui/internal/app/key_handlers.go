@@ -443,8 +443,10 @@ func (m *Model) activateByID(id string) tea.Cmd {
 		if len(m.ebooks) == 0 || m.ebookIndex < 0 || m.ebookIndex >= len(m.ebooks) {
 			return nil
 		}
+		if !m.openBook(m.ebooks[m.ebookIndex]) {
+			return nil
+		}
 		m.screen = ScreenReader
-		m.openBook(m.ebooks[m.ebookIndex])
 		return m.patchReaderStateCmd()
 	case "library.search.submit":
 		m.searchQuery = strings.TrimSpace(m.searchInput.Value())
@@ -519,8 +521,10 @@ func (m *Model) activateByID(id string) tea.Cmd {
 			return nil
 		}
 		m.ebookIndex = idx
+		if !m.openBook(m.ebooks[idx]) {
+			return nil
+		}
 		m.screen = ScreenReader
-		m.openBook(m.ebooks[idx])
 		return m.patchReaderStateCmd()
 	}
 
